@@ -1,1 +1,1 @@
-{"name":"dima-ai-studio","version":"0.4.0","private":true,"type":"module","scripts":{"start":"node server.js"},"engines":{"node":">=20"},"dependencies":{"express":"^5.1.0","@fal-ai/client":"^1.9.3"}}
+{"name":"dima-ai-studio","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node server.js"},"engines":{"node":">=20"},"dependencies":{"express":"^5.1.0"}}
