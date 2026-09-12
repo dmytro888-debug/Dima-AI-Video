@@ -19,12 +19,12 @@ const modules = [
   { id:'social', name:'Соцмережі', icon:'↗', desc:'TikTok, Reels, Facebook, YouTube', badge:'SOCIAL' }
 ];
 
-app.get('/api/health', (_req,res)=>res.json({ok:true,name:'Dima AI Studio',version:'0.1.0'}));
+app.get('/api/health', (_req,res)=>res.json({ok:true,name:'Dima AI Studio',version:'0.1.1'}));
 app.get('/api/modules', (_req,res)=>res.json(modules));
 app.post('/api/projects', (req,res)=>res.status(201).json({id:Date.now().toString(), name:req.body?.name || 'Новий проєкт', status:'draft'}));
 app.post('/api/generate', (req,res)=>res.status(202).json({ok:true,status:'queued',message:'Задачу додано в чергу. Підключіть AI provider keys у Railway для реальної генерації.',input:req.body || {}}));
 
-// Express 5 no longer accepts '*' as a route pattern; middleware handles all remaining routes.
+// Express 5 safe SPA fallback: no wildcard route pattern is used.
 app.use((_req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 app.listen(PORT,'0.0.0.0',()=>console.log(`Dima AI Studio listening on ${PORT}`));
