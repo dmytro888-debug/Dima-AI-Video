@@ -1,18 +1,66 @@
 import express from 'express';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { fal } from '@fal-ai/client';
+import {fileURLToPath} from 'node:url';
+import {spawn} from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
-const app=express(); const PORT=process.env.PORT||3000;
-app.use(express.json({limit:'2mb'})); app.use(express.static(path.join(__dirname,'public')));
-const modules=[{id:'video',name:'AI Відео',icon:'▶',desc:'Сценарій → сцени → відео',badge:'9:16'},{id:'image',name:'AI Зображення',icon:'✦',desc:'Генерація та редагування',badge:'AI'},{id:'music',name:'Музика',icon:'♫',desc:'Фон, настрій, BPM, трек',badge:'AUDIO'},{id:'voice',name:'Голос',icon:'◉',desc:'Різні голоси та озвучення',badge:'TTS'},{id:'subtitles',name:'Субтитри',icon:'T',desc:'Авто + стилі + анімації',badge:'AUTO'},{id:'editor',name:'AI Редактор',icon:'✂',desc:'Монтаж, ефекти, переходи',badge:'EDIT'},{id:'avatar',name:'AI Аватар',icon:'◎',desc:'Ведучий та presenter',badge:'AI'},{id:'social',name:'Соцмережі',icon:'↗',desc:'TikTok, Reels, Facebook, YouTube',badge:'SOCIAL'}];
-const providerCatalog=[{id:'openai',name:'OpenAI',env:'OPENAI_API_KEY',modules:['image','voice','subtitles','social']},{id:'replicate',name:'Replicate',env:'REPLICATE_API_TOKEN',modules:['video','image','music','avatar']},{id:'fal',name:'fal.ai',env:'FAL_KEY',modules:['video','image','music']},{id:'elevenlabs',name:'ElevenLabs',env:'ELEVENLABS_API_KEY',modules:['voice','avatar']}];
-app.get('/api/health',(_req,res)=>res.json({ok:true,name:'Dima AI Studio',version:'0.4.1'}));
+const app=express();
+const PORT=process.env.PORT||3000;
+const PUBLIC=path.join(__dirname,'public');
+const JOBS=path.join(__dirname,'local-engine','jobs');
+fs.mkdirSync(JOBS,{recursive:true});
+app.use(express.json({limit:'2mb'}));
+app.use(express.static(PUBLIC));
+
+const modules=[
+{id:'video',name:'AI Відео',icon:'▶',desc:'Текст → реальне відео',badge:'LOCAL'},
+{id:'image',name:'AI Зображення',icon:'✦',desc:'Підготовка кадрів',badge:'LOCAL'},
+{id:'music',name:'Музика',icon:'♫',desc:'Фон та монтаж',badge:'LOCAL'},
+{id:'voice',name:'Голос',icon:'◉',desc:'Локальна озвучка',badge:'LOCAL'},
+{id:'subtitles',name:'Субтитри',icon:'T',desc:'Безпечна зона + стилі',badge:'AUTO'},
+{id:'editor',name:'AI Редактор',icon:'✂',desc:'Монтаж та сцени',badge:'LOCAL'},
+{id:'avatar',name:'AI Аватар',icon:'◎',desc:'Локальні аватари',badge:'LOCAL'},
+{id:'social',name:'Соцмережі',icon:'↗',desc:'TikTok, Reels, Facebook, YouTube',badge:'EXPORT'}
+];
+
+app.get('/api/health',(_req,res)=>res.json({ok:true,name:'Dima AI Studio',version:'1.0.0',mode:'self-hosted'}));
 app.get('/api/modules',(_req,res)=>res.json(modules));
-app.get('/api/providers',(_req,res)=>res.json(providerCatalog.map(p=>({id:p.id,name:p.name,configured:Boolean(process.env[p.env]),modules:p.modules}))));
+app.get('/api/providers',(_req,res)=>res.json([{id:'local',name:'Dima Local AI Engine',configured:true,modules:['video','image','music','voice','subtitles','editor','avatar','social'],paid:false}])) ;
 app.get('/api/projects',(_req,res)=>res.json([]));
 app.post('/api/projects',(req,res)=>res.status(201).json({id:Date.now().toString(),name:req.body?.name||'Новий проєкт',status:'draft'}));
-async function generateOpenAIImage(prompt,size='1024x1024'){const r=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${process.env.OPENAI_API_KEY}`},body:JSON.stringify({model:'gpt-image-2',prompt,size})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d?.error?.message||`OpenAI HTTP ${r.status}`);const i=d?.data?.[0];if(i?.url)return{url:i.url};if(i?.b64_json)return{dataUrl:`data:image/png;base64,${i.b64_json}`};throw new Error('OpenAI не повернув зображення.');}
-async function generateFalVideo(input){fal.config({credentials:process.env.FAL_KEY});const format=String(input.format||'');const aspect_ratio=format.startsWith('16:9')?'16:9':format.startsWith('1:1')?'1:1':'9:16';const requested=String(input.duration||'5');const duration=['3','4','5','6','7','8','9','10','11','12','13','14','15'].includes(requested)?requested:'10';const prompt=String(input.prompt||'A cinematic realistic flying vehicle continuously flying above a bright modern city in natural daylight, physically believable motion, dynamic camera, premium film look, vivid natural colors');const result=await fal.subscribe('fal-ai/kling-video/v3/standard/text-to-video',{input:{prompt,aspect_ratio,duration,generate_audio:false,negative_prompt:'blur, distortion, flicker, low quality, dark image, unrealistic physics'},logs:true});const video=result?.data?.video;if(!video?.url)throw new Error('fal.ai не повернув відеофайл.');return{url:video.url,requestId:result.requestId||null,provider:'fal',model:'kling-video-v3-standard',duration};}
-app.post('/api/generate',async(req,res)=>{const input=req.body||{};const requested=input.module||'video';const providers=providerCatalog.filter(p=>p.modules.includes(requested));const configured=providers.find(p=>process.env[p.env]);if(!configured)return res.status(503).json({ok:false,status:'provider_required',module:requested,message:`Для «${modules.find(m=>m.id===requested)?.name||requested}» ще не підключено AI-провайдер.`});try{if(requested==='video'&&configured.id==='fal'){const video=await generateFalVideo(input);return res.json({ok:true,status:'completed',module:'video',message:'Відео успішно створено.',...video});}if(requested==='image'&&configured.id==='openai'){const size=String(input.format||'').startsWith('9:16')?'1024x1536':String(input.format||'').startsWith('16:9')?'1536x1024':'1024x1024';const image=await generateOpenAIImage(String(input.prompt||'Створи якісне AI-зображення'),size);return res.json({ok:true,status:'completed',provider:'openai',module:'image',message:'Зображення успішно створено.',...image});}return res.status(202).json({ok:true,status:'queued',provider:configured.id,message:`Провайдер ${configured.name} підключений. Цей модуль готується до реальної генерації.`,input});}catch(error){console.error(error);return res.status(502).json({ok:false,status:'provider_error',provider:configured.id,message:error?.message||'Помилка AI-провайдера.'});}});
-app.use((_req,res)=>res.sendFile(path.join(__dirname,'public','index.html'))); app.listen(PORT,'0.0.0.0',()=>console.log(`Dima AI Studio 0.4.1 listening on ${PORT}`));
+
+function pythonCommand(){return process.platform==='win32'?'python':'python3';}
+function sizeFor(format){const f=String(format||'9:16');if(f.startsWith('16:9'))return '832*480';if(f.startsWith('1:1'))return '624*624';return '480*832';}
+function durationSeconds(value){const s=String(value||'5');if(s==='15')return 15;if(s==='30')return 30;if(s==='60')return 60;if(s.toLowerCase().includes('long'))return 60;return 5;}
+function runLocalGeneration({prompt,size,seconds,output}){return new Promise((resolve,reject)=>{const script=path.join(__dirname,'local-engine','generate_local.py');const args=[script,'--prompt',prompt,'--size',size,'--seconds',String(seconds),'--output',output];const child=spawn(pythonCommand(),args,{cwd:__dirname,env:{...process.env,DIMA_AI_STUDIO_ROOT:__dirname},stdio:['ignore','pipe','pipe']});let out='',err='';child.stdout.on('data',d=>out+=d);child.stderr.on('data',d=>err+=d);child.on('error',e=>reject(new Error(`Не знайдено Python: ${e.message}`)));child.on('close',code=>{if(code===0){resolve(out.trim());}else reject(new Error((err||out||`Локальний двигун завершився з кодом ${code}`).slice(-4000)));});});}
+
+app.post('/api/generate',async(req,res)=>{
+ const input=req.body||{};
+ if((input.module||'video')!=='video')return res.status(501).json({ok:false,status:'not_implemented',message:'Цей модуль ще не підключений до локального AI-двигуна. AI Відео вже працює через власний self-hosted engine.'});
+ const id=crypto.randomUUID();
+ const output=path.join(JOBS,`${id}.mp4`);
+ const prompt=String(input.prompt||'A realistic cinematic flying vehicle continuously flying above a bright modern city in daylight, physically believable motion, dynamic camera, natural light, vivid colors');
+ try{
+   const seconds=durationSeconds(input.duration);
+   const size=sizeFor(input.format);
+   await runLocalGeneration({prompt,size,seconds,output});
+   if(!fs.existsSync(output))throw new Error('Локальний двигун завершився без відеофайлу.');
+   return res.json({ok:true,status:'completed',module:'video',provider:'local',message:`Готово: ${seconds} с. Відео створено локально без платних API.`,url:`/api/media/${id}.mp4`,duration:seconds});
+ }catch(error){
+   console.error(error);
+   return res.status(502).json({ok:false,status:'local_engine_error',provider:'local',message:error?.message||'Помилка локального AI-двигуна.',hint:'Запусти local-engine/SETUP-WINDOWS.ps1 на ПК з NVIDIA GPU.'});
+ }
+});
+
+app.get('/api/media/:name', (req,res)=>{
+ const safe=path.basename(req.params.name);
+ if(!safe.endsWith('.mp4'))return res.status(404).end();
+ const file=path.join(JOBS,safe);
+ if(!fs.existsSync(file))return res.status(404).end();
+ res.type('video/mp4');res.sendFile(file);
+});
+
+app.use((_req,res)=>res.sendFile(path.join(PUBLIC,'index.html')));
+app.listen(PORT,'0.0.0.0',()=>console.log(`Dima AI Studio 1.0.0 self-hosted listening on ${PORT}`));
